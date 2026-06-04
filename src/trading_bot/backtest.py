@@ -38,7 +38,16 @@ class BacktestResult:
     max_drawdown_pct: float
 
 
-def run_backtest(candles: list[Candle], config: StrategyConfig) -> BacktestResult:
+from typing import Callable
+
+ModelFilter = Callable[[int], bool]
+
+
+def run_backtest(
+    candles: list[Candle],
+    config: StrategyConfig,
+    model_filter: ModelFilter | None = None,
+) -> BacktestResult:
     snapshots = build_signal_snapshots(candles, config)
     equity = config.starting_equity
     equity_curve: list[float] = [equity]
@@ -49,7 +58,7 @@ def run_backtest(candles: list[Candle], config: StrategyConfig) -> BacktestResul
     daily_start_equity = equity
     daily_realized_pnl = 0.0
 
-    for snapshot in snapshots:
+    for index, snapshot in enumerate(snapshots):
         candle = snapshot.candle
         candle_day = candle.timestamp.split("T", 1)[0]
         if candle_day != active_day:
@@ -72,11 +81,15 @@ def run_backtest(candles: list[Candle], config: StrategyConfig) -> BacktestResul
         if open_position is None and cooldown_remaining > 0:
             cooldown_remaining -= 1
 
+        strategy_signal = snapshot.is_long_entry
+        if model_filter is not None and strategy_signal:
+            strategy_signal = model_filter(index)
+
         if (
             open_position is None
             and cooldown_remaining == 0
             and not max_loss_reached
-            and snapshot.is_long_entry
+            and strategy_signal
         ):
             open_position = _open_long_position(snapshot, equity, config)
 

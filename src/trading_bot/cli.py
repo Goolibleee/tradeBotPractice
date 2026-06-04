@@ -8,7 +8,9 @@ from trading_bot.binance_vision import BinanceVisionCandleDataSource
 from trading_bot.config import BacktestDataConfig, StrategyConfig, apply_overrides
 from trading_bot.data import Candle, CandleRequest, CsvCandleDataSource
 from trading_bot.dataset import build_dataset, export_dataset_to_csv
+from trading_bot.model_filter import ModelSignalFilter
 from trading_bot.reporting import build_report
+from trading_bot.train import run_training
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -19,12 +21,20 @@ def build_parser() -> argparse.ArgumentParser:
     backtest_parser = subparsers.add_parser("backtest", help="Run a backtest")
     _add_data_args(backtest_parser)
     _add_strategy_args(backtest_parser)
+    backtest_parser.add_argument("--model-path", help="Path to a trained model to use as an entry filter")
 
     # Dataset command
     dataset_parser = subparsers.add_parser("dataset", help="Build and export a training dataset")
     _add_data_args(dataset_parser)
     _add_strategy_args(dataset_parser)
     dataset_parser.add_argument("--output", required=True, help="Output CSV path for the dataset")
+
+    # Train command
+    train_parser = subparsers.add_parser("train", help="Train a classifier on a dataset")
+    train_parser.add_argument("--dataset", required=True, help="Path to a dataset CSV")
+    train_parser.add_argument("--model-path", required=True, help="Output path for the trained model")
+    train_parser.add_argument("--model-type", choices=["logistic_regression", "random_forest"], default="logistic_regression")
+    train_parser.add_argument("--test-size", type=float, default=0.2, help="Fraction of data for test set")
 
     return parser
 
@@ -55,6 +65,15 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
+    if args.command == "train":
+        run_training(
+            dataset_path=args.dataset,
+            model_path=args.model_path,
+            model_type=args.model_type,
+            test_size=args.test_size,
+        )
+        return
+
     config = _build_strategy_config(args)
     data_config = _build_data_config(args)
     candles = load_candles(
@@ -64,7 +83,12 @@ def main() -> None:
     )
 
     if args.command == "backtest":
-        result = run_backtest(candles, config)
+        model_filter = None
+        if args.model_path:
+            filter_obj = ModelSignalFilter(args.model_path, config)
+            filter_obj.prepare(candles)
+            model_filter = filter_obj.should_enter
+        result = run_backtest(candles, config, model_filter=model_filter)
         print(build_report(result, config))
     elif args.command == "dataset":
         rows = build_dataset(candles, config)
