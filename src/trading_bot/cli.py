@@ -11,6 +11,7 @@ from trading_bot.dataset import build_dataset, export_dataset_to_csv
 from trading_bot.model_filter import ModelSignalFilter
 from trading_bot.reporting import build_report
 from trading_bot.train import run_training
+from trading_bot.walkforward import run_walkforward_test
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -35,6 +36,25 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--model-path", required=True, help="Output path for the trained model")
     train_parser.add_argument("--model-type", choices=["logistic_regression", "random_forest"], default="logistic_regression")
     train_parser.add_argument("--test-size", type=float, default=0.2, help="Fraction of data for test set")
+
+    # Walkforward command
+    walkforward_parser = subparsers.add_parser("walkforward", help="Run a walk-forward out-of-sample test")
+    walkforward_parser.add_argument("--train-source", choices=["csv", "binance", "binance-vision"], default="csv")
+    walkforward_parser.add_argument("--train-data", help="Path to training CSV")
+    walkforward_parser.add_argument("--test-source", choices=["csv", "binance", "binance-vision"], default="csv")
+    walkforward_parser.add_argument("--test-data", help="Path to test CSV")
+    walkforward_parser.add_argument("--symbol", default="BTCUSDT")
+    walkforward_parser.add_argument("--interval", default="1h")
+    walkforward_parser.add_argument("--archive-market", choices=["spot"], default="spot")
+    walkforward_parser.add_argument("--archive-period", choices=["daily", "monthly"], default="daily")
+    walkforward_parser.add_argument("--train-start-date", help="Training period start")
+    walkforward_parser.add_argument("--train-end-date", help="Training period end")
+    walkforward_parser.add_argument("--test-start-date", help="Test period start")
+    walkforward_parser.add_argument("--test-end-date", help="Test period end")
+    walkforward_parser.add_argument("--cache-dir", default="data/binance")
+    walkforward_parser.add_argument("--allow-insecure-ssl", action="store_true")
+    walkforward_parser.add_argument("--model-type", choices=["logistic_regression", "random_forest"], default="random_forest")
+    _add_strategy_args(walkforward_parser)
 
     return parser
 
@@ -74,6 +94,10 @@ def main() -> None:
         )
         return
 
+    if args.command == "walkforward":
+        _run_walkforward_cli(args)
+        return
+
     config = _build_strategy_config(args)
     data_config = _build_data_config(args)
     candles = load_candles(
@@ -96,6 +120,51 @@ def main() -> None:
         print(f"Dataset exported: {args.output}")
         print(f"Rows: {len(rows)}")
         print(f"Columns: {len(rows[0].__dict__) if rows else 0}")
+
+
+def _run_walkforward_cli(args: argparse.Namespace) -> None:
+    config = _build_strategy_config(args)
+
+    # Load training candles
+    train_config = BacktestDataConfig(
+        source=args.train_source,
+        csv_path=args.train_data,
+        symbol=args.symbol,
+        interval=args.interval,
+        archive_market=args.archive_market,
+        archive_period=args.archive_period,
+        archive_start_date=args.train_start_date,
+        archive_end_date=args.train_end_date,
+    )
+    train_candles = load_candles(
+        train_config,
+        cache_dir=args.cache_dir,
+        allow_insecure_ssl=args.allow_insecure_ssl,
+    )
+
+    # Load test candles
+    test_config = BacktestDataConfig(
+        source=args.test_source,
+        csv_path=args.test_data,
+        symbol=args.symbol,
+        interval=args.interval,
+        archive_market=args.archive_market,
+        archive_period=args.archive_period,
+        archive_start_date=args.test_start_date,
+        archive_end_date=args.test_end_date,
+    )
+    test_candles = load_candles(
+        test_config,
+        cache_dir=args.cache_dir,
+        allow_insecure_ssl=args.allow_insecure_ssl,
+    )
+
+    run_walkforward_test(
+        train_candles=train_candles,
+        test_candles=test_candles,
+        config=config,
+        model_type=args.model_type,
+    )
 
 
 def _build_strategy_config(args: argparse.Namespace) -> StrategyConfig:

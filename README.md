@@ -96,17 +96,59 @@ PYTHONPATH=src python -m trading_bot.cli backtest \
   --model-path models/btc_direction_rf_v1.pkl
 ```
 
+### Walk-Forward Out-of-Sample Test
+
+The most honest way to test a model: train on one period, test on a completely different period:
+
+```bash
+PYTHONPATH=src python -m trading_bot.cli walkforward \
+  --train-source binance-vision --symbol BTCUSDT --interval 1h \
+  --archive-period daily --train-start-date 2024-01-01 --train-end-date 2024-01-31 \
+  --test-source binance-vision --test-start-date 2024-02-01 --test-end-date 2024-02-15 \
+  --allow-insecure-ssl \
+  --model-type random_forest
+```
+
+## Testing
+
+### Run Automated Unit Tests
+
+```bash
+python3 -m pip install pytest
+PYTHONPATH=src python3 -m pytest tests/ -v
+```
+
+Tests cover:
+- **Indicators** (`test_indicators.py`): SMA and ATR math correctness
+- **Backtest** (`test_backtest.py`): equity tracking, cooldown, model filter wiring
+- **Features** (`test_features.py`): feature computation, no lookahead, label correctness
+- **Dataset** (`test_dataset.py`): CSV export, completeness filtering
+
+### What to Test After Every Change
+
+1. **Unit tests pass**: `pytest tests/ -v`
+2. **No lookahead bias**: verify features only use data up to current candle
+3. **Model generalizes**: use `walkforward` with train/test on different months
+4. **Base strategy unchanged**: backtest without `--model-path` should match previous results
+
+### Testing Philosophy
+
+- **Unit tests** catch math bugs and regression
+- **Walk-forward tests** catch overfitting (the model memorized training data)
+- **Paper trading** catches execution bugs before real money is at risk
+- **Never test a model on data it was trained on** — this is the #1 mistake in ML trading
+
 ## Workflow
 
 1. **Generate dataset** from historical candles
 2. **Train a model** on the dataset
-3. **Backtest with model filter** to see if it improves the base strategy
-4. **Iterate** by adding more features or using more data
+3. **Run walk-forward test** to see if it generalizes to unseen data
+4. **Backtest with model filter** to compare against base strategy
+5. **Iterate** by adding more features or using more data
 
 ## Next Steps
 
 - add more features (RSI, MACD, Bollinger Bands)
 - add dedicated paper trading and live execution modules
 - add live exchange execution and alerting
-- add walk-forward validation to prevent overfitting
 - experiment with different model architectures
